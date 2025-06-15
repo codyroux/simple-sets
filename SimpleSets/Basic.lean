@@ -244,129 +244,125 @@ theorem Primrec.boundedMinOptPrimrec (f : ℕ → Bool) :
 
 #print Nat.Partrec.Code
 #print Nat.Partrec.Code.eval
+#print Nat.Partrec.Code.evaln
+#check Nat.Partrec.Code.evaln_prim
 #check Nat.Partrec.Code.exists_code
 
 open Nat.Partrec (Code)
 
-def evalPrim : Code → ℕ → ℕ → Option ℕ
-| .zero, _, _ => some 0
-| .succ, _, n => some (n + 1)
-| .left, _, n => some n.unpair.1
-| .right, _, n => some n.unpair.2
-| .pair f g, bound, n =>
-  Nat.pair <$> evalPrim f bound n <*> evalPrim g bound n
-| .comp f g, bound, n =>
-  evalPrim g bound n >>= evalPrim f bound
-| .prec f g, bound, n =>
-  Nat.unpaired (fun a m =>
-    Nat.rec (evalPrim f bound a)
-    (fun y IH ↦ do
-      let i ← IH
-      evalPrim g bound (Nat.pair a (Nat.pair y i)))
-    m) n
-| .rfind' f, bound, a =>
-  boundedMinOpt
-    (fun n => Option.isSome (do
-      let v ← evalPrim f bound (Nat.pair a n)
-      guard (v = 0)
-      return v))
-    bound
+#check Code.evaln
 
+-- enumCode₂
+def enumCode₂ (c : Code) (mem : ℕ) (gas input : ℕ) : ℕ :=
+  Option.casesOn (Code.evaln gas c input) mem (fun _ => input)
 
--- Crucial lemma
-lemma evalCorrect (c : Code) (bound n out : ℕ) : evalPrim c bound n = .some out → out ∈ Code.eval c n :=
+#check Option.rec
+#check Primrec.option_casesOn
+#check Primrec.pair
+
+lemma enumCode_prim (c : Code) (mem : ℕ) :
+  Primrec₂ (enumCode₂ c mem) := by
+  simp [Primrec₂, enumCode₂]
+  apply Primrec.option_casesOn ?_ ?_ ?_
+  . refine (Code.evaln_prim).comp (.pair (.pair ?_ ?_) ?_)
+    . exact Primrec.fst
+    . exact Primrec.const c
+    . exact Primrec.snd
+  . exact Primrec.const mem
+  . exact Primrec.snd.comp (Primrec.fst)
+
+#check Code.eval_eq_rfindOpt
+#check Code.evaln_complete
+#print Nat.rfindOpt
+#check Nat.rfindOpt_spec
+
+lemma enumCode_image_aux (c : Code) (mem : ℕ) :
+  ∀ k ∈ c.eval.Dom, ∃ gas, enumCode₂ c mem gas k = k :=
 by
-  revert bound n out
-  induction c
-  case zero =>
-    intros bound n out h
-    simp [evalPrim] at h
-    cases h
-    simp [Code.eval, pure, PFun.pure]
-  case succ =>
-    intros bound n out h
-    simp [evalPrim] at h
-    cases h
-    simp [Code.eval]
-  case left =>
-    intros bound n out h
-    simp [evalPrim] at h
-    cases h
-    simp [Code.eval]
-  case right =>
-    intros bound n out h
-    simp [evalPrim] at h
-    cases h
-    simp [Code.eval]
-  case pair f g f_ih g_ih =>
-    intros bound n out h
-    simp [evalPrim] at h
-    match fh: (evalPrim f bound n) with
-    | .none =>
-      rw [fh] at h
-      simp [Seq.seq] at h
-    | .some x =>
-      match gh: (evalPrim g bound n) with
-      | .none => rw [gh] at h; simp [Seq.seq] at h
-      | .some y =>
-        rw [fh, gh] at h; simp [Seq.seq] at h
-        simp [Code.eval, Seq.seq]
-        exists x; constructor; apply f_ih; assumption
-        exists y; constructor; apply g_ih <;> assumption
-        assumption
-  case comp f g f_ih g_ih =>
-    intros bound n out h
-    simp [evalPrim] at h
-    simp [Code.eval]
-    match gh: (evalPrim g bound n) with
-    | .none =>
-      rw [gh] at h
-      simp at h
-    | .some x =>
-      rw [gh] at h; simp at h
-      match fh: (evalPrim f bound x) with
-      | .none => rw [fh] at h; simp [Seq.seq] at h
-      | .some y =>
-        rw [fh] at h; simp [Seq.seq] at h; rw [← h]
-        exists x; constructor; apply g_ih; assumption
-        apply f_ih; assumption
-  case prec f g f_ih g_ih =>
-    intros bound n out h
-    simp [evalPrim] at h
-    sorry
-  case rfind' f f_ih =>
-    intros bound n out h
-    simp [evalPrim] at h
-    simp [Code.eval]
-    sorry
+  intros k k_mem_dom
+  simp [enumCode₂]
+  have h := @Code.evaln_complete c k ((c.eval k).get k_mem_dom)
+  simp at h
+  have h' := h.1 ?_
+  . have ⟨gas, h'⟩ := h'
+    exists gas; simp [h']
+  . exact Part.get_mem k_mem_dom
 
--- And evalPrim is primrec
-lemma evalPrimPrimrec (c : Code) : Primrec₂ <| evalPrim c := sorry
+lemma enumCode_image_inc₂ (c : Code) (mem : ℕ) :
+  ∀ n ∈ c.eval.Dom, ∃ p : ℕ, enumCode₂ c mem p.unpair.1 p.unpair.2 = n :=
+  by
+    intros n n_in_dom
+    have ⟨gas, h⟩ := enumCode_image_aux c mem n n_in_dom
+    exists Nat.pair gas n; simp; trivial
 
+
+lemma enumCode_inc_image₂ (c : Code) (mem : ℕ) :
+  mem ∈ c.eval.Dom →
+  ∀ p : ℕ , enumCode₂ c mem p.unpair.1 p.unpair.2 ∈ (c.eval).Dom :=
+  by
+    intros mem_in_dom p
+    simp [enumCode₂] at *
+    cases h:(Code.evaln p.unpair.1 c p.unpair.2)
+    case none => simpa
+    case some val =>
+      simp
+      have h' := @Code.evaln_complete c p.unpair.2 val
+      exists val; apply h'.2; exists p.unpair.1
+
+def enumCode (c : Code)(mem k : ℕ) :=
+  enumCode₂ c mem (k.unpair.1) (k.unpair.2)
+
+theorem enumcode_iff_in_image (c : Code) (mem : ℕ)
+(mem_in_dom : mem ∈ c.eval.Dom) (n : ℕ):
+ n ∈ c.eval.Dom ↔ ∃ k, enumCode c mem k = n :=
+ by
+  apply Iff.intro
+  case mp =>
+    intros n_mem
+    apply enumCode_image_inc₂; trivial
+  case mpr =>
+    -- this is dumb, how do I intro and destruct?
+    intros h
+    have ⟨k, h⟩ := h; rw [← h]
+    apply enumCode_inc_image₂; trivial
+
+open Encodable Part
+
+#print Encodable
+
+-- Some tedium here since we're not in ℕ
 theorem REPred_is_Primrec {α : Type} [Primcodable α] (A : Set α) (nonEmpty : A.Nonempty) :
   REPred A → PrimRecImage A
 :=
 by
-  . sorry
+  simp [REPred, PrimRecImage]
+  let f a := Part.assert (A a) (λ _ ↦ Part.some ())
+  have eq_f : f = λ a ↦ Part.assert (A a) (λ _ ↦ Part.some ()) :=
+    by eq_refl
+  rw [← eq_f]; intros prf
+  let f' : ℕ →. ℕ := fun n => Part.bind (decode (α := α) n) fun a => (f a).map encode
+  have partRec_f' : Nat.Partrec f' := prf
+  have h := Code.exists_code.1 partRec_f'
+  have ⟨c, h⟩ := h
+  let a := nonEmpty.choose
+  have a_in_A : A a := by simp [a]; apply Exists.choose_spec
+  have a_in_fDom : () ∈ f a := by simp [f]; trivial
+  have enc_a_in_f' : 0 ∈ f' (encode a) := by simp [f']; exists ()
+  let f'' k : α :=
+    let x := enumCode c (encode a) k >>= decode (α := α)
+    Option.casesOn x a (λ a' ↦ a')
+  exists f''
+  apply And.intro
+  . sorry -- ugh
+  . intro b
+    sorry
 
 #print Nat.Primrec
 
 theorem Primrec_is_RE {α : Type} [Primcodable α] (f : ℕ → ℕ) (primrec_f : Nat.Primrec f) :
   ∃ f', Nat.Partrec f' ∧ ∀ n, (f' n).Dom ∧ (f n) ∈ f' n :=
 by
-  cases primrec_f
-  case zero => exact ⟨pure 0,
-    by
-      constructor
-      . apply Nat.Partrec.zero
-      . intros n; simp [pure, PFun.pure]
-  ⟩
-  . sorry
-  . sorry
-  . sorry
-  . sorry
-  . sorry
-  . sorry
+  sorry
 
 theorem Primrec_image_is_REPred {α β : Type} [Primcodable α] [Primcodable β]
   (B : Set β) (isIPrimrecImage : PrimRecImage B) :
