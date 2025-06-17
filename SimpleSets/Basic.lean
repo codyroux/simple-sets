@@ -8,7 +8,7 @@ import Mathlib.Computability.Reduce
 
 -- A non-empty recursively enumerable set is the image of a primitive recursive function
 def PrimRecImage {β : Type} [Primcodable β] (B : Set β) :=
-  ∃ (f : ℕ → β), Primrec f ∧ ∀ b, b ∈ B ↔ ∃ a, f a ∈ B
+  ∃ (f : ℕ → β), Primrec f ∧ ∀ b, b ∈ B ↔ ∃ a, f a = b
 
 
 def boundedMin (f : ℕ → Bool) (n : ℕ) : ℕ :=
@@ -326,43 +326,46 @@ theorem enumcode_iff_in_image (c : Code) (mem : ℕ)
     have ⟨k, h⟩ := h; rw [← h]
     apply enumCode_inc_image₂; trivial
 
-open Encodable Part
-
 #print Encodable
+#print REPred
+
+def Nat.REPred (A : Set ℕ) : Prop := Nat.Partrec
+  λ a ↦ Part.assert (a ∈ A) (λ _ ↦ Part.some 0)
+
+
+theorem Nat.REPred_is_Primrec (A : Set ℕ) (nonEmpty : A.Nonempty) :
+  Nat.REPred A → PrimRecImage A
+:=
+by
+  simp [REPred, PrimRecImage]
+  intros prf
+  have h := Code.exists_code.1 prf
+  have ⟨c, h⟩ := h
+  let a := nonEmpty.choose
+  have a_in_A : a ∈ A := by simp [a]; apply Exists.choose_spec
+  exists (fun n => enumCode c a n)
+  constructor
+  . apply enumCode_prim
+  . intro b
+    have A_dom : A = c.eval.Dom := by
+      rw [h]; simp
+      funext x; simp [setOf, Part.assert, Part.Dom]
+      trivial
+    rw [A_dom]
+    apply enumcode_iff_in_image
+    rw [← A_dom]; trivial
+
+open Encodable Part
 
 -- Some tedium here since we're not in ℕ
 theorem REPred_is_Primrec {α : Type} [Primcodable α] (A : Set α) (nonEmpty : A.Nonempty) :
   REPred A → PrimRecImage A
 :=
 by
-  simp [REPred, PrimRecImage]
-  let f a := Part.assert (A a) (λ _ ↦ Part.some ())
-  have eq_f : f = λ a ↦ Part.assert (A a) (λ _ ↦ Part.some ()) :=
-    by eq_refl
-  rw [← eq_f]; intros prf
-  let f' : ℕ →. ℕ := fun n => Part.bind (decode (α := α) n) fun a => (f a).map encode
-  have partRec_f' : Nat.Partrec f' := prf
-  have h := Code.exists_code.1 partRec_f'
-  have ⟨c, h⟩ := h
-  let a := nonEmpty.choose
-  have a_in_A : A a := by simp [a]; apply Exists.choose_spec
-  have a_in_fDom : () ∈ f a := by simp [f]; trivial
-  have enc_a_in_f' : 0 ∈ f' (encode a) := by simp [f']; exists ()
-  let f'' k : α :=
-    let x := enumCode c (encode a) k >>= decode (α := α)
-    Option.casesOn x a (λ a' ↦ a')
-  exists f''
-  apply And.intro
-  . sorry -- ugh
-  . intro b
-    sorry
+  sorry
 
 #print Nat.Primrec
 
-theorem Primrec_is_RE {α : Type} [Primcodable α] (f : ℕ → ℕ) (primrec_f : Nat.Primrec f) :
-  ∃ f', Nat.Partrec f' ∧ ∀ n, (f' n).Dom ∧ (f n) ∈ f' n :=
-by
-  sorry
 
 theorem Primrec_image_is_REPred {α β : Type} [Primcodable α] [Primcodable β]
   (B : Set β) (isIPrimrecImage : PrimRecImage B) :
